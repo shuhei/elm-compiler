@@ -6,7 +6,7 @@ module Parse.Primitives
   , run, runAt
   , try, deadend, hint, endOfFile
   , noFloatsAllowedInPatterns
-  , getPosition, getCol
+  , getPosition, getCol, getOffset
   , pushContext, popContext
   , getIndent, setIndent
   , W.SPos
@@ -143,6 +143,12 @@ getCol :: Parser Int
 getCol =
   Parser $ \state@(State _ _ _ _ _ col _) _ _ eok _ ->
     eok col state noError
+
+
+getOffset :: Parser Int
+getOffset =
+  Parser $ \state@(State _ offset _ _ _ _ _) _ _ eok _ ->
+    eok offset state noError
 
 
 pushContext :: R.Position -> E.Context -> Parser ()

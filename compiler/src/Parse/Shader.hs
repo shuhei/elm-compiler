@@ -1,14 +1,16 @@
 {-# OPTIONS_GHC -Wall #-}
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE BangPatterns, OverloadedStrings #-}
 module Parse.Shader
   ( shader
   )
   where
 
 
+import qualified Data.ByteString.Internal as B
 import qualified Data.List as List
 import qualified Data.Map as Map
 import qualified Data.Text as Text
+import qualified Data.Text.Encoding as Text
 import qualified Language.GLSL.Parser as GLP
 import qualified Language.GLSL.Syntax as GLS
 import qualified Text.Parsec as Parsec
@@ -19,7 +21,8 @@ import qualified AST.Utils.Shader as Shader
 import qualified Elm.Name as N
 import qualified Reporting.Annotation as A
 import qualified Reporting.Region as R
-import Parse.Primitives (Parser, getPosition)
+import Parse.Primitives (Parser, getPosition, getOffset)
+import Parse.Primitives.Internals (Parser(..), State(..), noError)
 import qualified Parse.Primitives.Shader as Shader
 
 
@@ -29,12 +32,32 @@ import qualified Parse.Primitives.Shader as Shader
 
 shader :: R.Position -> Parser Src.Expr
 shader start@(R.Position row col) =
-  do  block <- Shader.block
-      shdr <- parseSource row col (Text.unpack block)
+  do  startOffset <- getOffset
+      shdr <- parseBlock
+      endOffset <- getOffset
+      block <- getText startOffset endOffset
       end@(R.Position row2 col2) <- getPosition
       let uid = List.intercalate ":" (map show [row, col, row2, col2])
       let src = Text.replace "\n" "\\n" (Text.replace "\r\n" "\\n" block)
       return (A.at start end (Src.Shader (Text.pack uid) src shdr))
+
+
+getText :: Int -> Int -> Parser Text.Text
+getText start end =
+  Parser $ \state@(State fp _ _ _ _ _ _) _ _ eok _ ->
+    let
+      !size = end - start
+      !shader = Text.decodeUtf8 (B.PS fp start size)
+    in
+      eok shader state noError
+
+
+parseBlock :: Parser Shader.Shader
+parseBlock =
+  -- TODO: Parse the `{|glsl`
+  -- TODO: Parse GLSL
+  -- TODO: Parse the `|}`
+  return emptyShader
 
 
 parseSource :: Int -> Int -> String -> Parser Shader.Shader
