@@ -8,11 +8,13 @@ module Parse.Primitives.Shader
 
 
 import qualified Data.ByteString.Internal as B
+import qualified Data.Map as Map
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import Foreign.ForeignPtr (ForeignPtr)
 import GHC.Word (Word8)
 
+import qualified AST.Utils.Shader as Shader
 import Parse.Primitives.Internals (Parser(..), State(..), noError)
 import qualified Parse.Primitives.Internals as I
 import qualified Parse.Primitives.Symbol as Symbol

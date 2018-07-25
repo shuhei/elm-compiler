@@ -1,5 +1,5 @@
 {-# OPTIONS_GHC -Wall #-}
-{-# LANGUAGE BangPatterns, OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings #-}
 module Parse.Shader
   ( shader
   )
@@ -21,7 +21,7 @@ import qualified AST.Utils.Shader as Shader
 import qualified Elm.Name as N
 import qualified Reporting.Annotation as A
 import qualified Reporting.Region as R
-import Parse.Primitives (Parser, getPosition, getOffset)
+import Parse.Primitives (Parser, getPosition, getOffset, getState)
 import Parse.Primitives.Internals (Parser(..), State(..), noError)
 import qualified Parse.Primitives.Shader as Shader
 
@@ -32,58 +32,38 @@ import qualified Parse.Primitives.Shader as Shader
 
 shader :: R.Position -> Parser Src.Expr
 shader start@(R.Position row col) =
-  do  startOffset <- getOffset
-      shdr <- parseBlock
+  do  startState <- getState
+      block <- Shader.block
       endOffset <- getOffset
-      block <- getText startOffset endOffset
       end@(R.Position row2 col2) <- getPosition
+      -- TODO: Rollback to startOffset
+      -- setState (startState { _terminal = endOffset })
+      -- TODO: Parse only GLSL (set terminal or run parser?)
+      shdr <- parse
       let uid = List.intercalate ":" (map show [row, col, row2, col2])
       let src = Text.replace "\n" "\\n" (Text.replace "\r\n" "\\n" block)
       return (A.at start end (Src.Shader (Text.pack uid) src shdr))
 
 
-getText :: Int -> Int -> Parser Text.Text
-getText start end =
-  Parser $ \state@(State fp _ _ _ _ _ _) _ _ eok _ ->
-    let
-      !size = end - start
-      !shader = Text.decodeUtf8 (B.PS fp start size)
-    in
-      eok shader state noError
+data StorageQualifier
+  = Attribute
+  | Uniform
+  | Varying
 
 
-parseBlock :: Parser Shader.Shader
-parseBlock =
-  -- TODO: Parse the `{|glsl`
-  -- TODO: Parse GLSL
-  -- TODO: Parse the `|}`
-  return emptyShader
+data GLDeclaration
+  = GLDeclaration StorageQualifier Shader.Type N.Name
 
 
-parseSource :: Int -> Int -> String -> Parser Shader.Shader
-parseSource startRow startCol src =
-  case GLP.parse src of
-    Right (GLS.TranslationUnit decls) ->
-      return (foldr addInput emptyShader (concatMap extractInputs decls))
-
-    Left err ->
-      let
-        pos = Parsec.errorPos err
-        row = Parsec.sourceLine pos
-        col = Parsec.sourceColumn pos
-        msg =
-          Parsec.showErrorMessages
-            "or"
-            "unknown parse error"
-            "expecting"
-            "unexpected"
-            "end of input"
-            (Parsec.errorMessages err)
-      in
-        if row == 1 then
-          Shader.failure startRow (startCol + 6 + col) (Text.pack msg)
-        else
-          Shader.failure (startRow + row - 1) col (Text.pack msg)
+parse :: Parser Shader.Shader
+parse =
+  let
+    decls =
+      -- Dummy value
+      [ GLDeclaration Uniform Shader.V2 (N.fromString "vcoord")
+      ]
+  in
+    return (foldr addInput emptyShader decls)
 
 
 emptyShader :: Shader.Shader
@@ -91,36 +71,17 @@ emptyShader =
   Shader.Shader Map.empty Map.empty Map.empty
 
 
-addInput :: (GLS.StorageQualifier, Shader.Type, String) -> Shader.Shader -> Shader.Shader
-addInput (qual, tipe, name) glDecls =
+addInput :: GLDeclaration -> Shader.Shader -> Shader.Shader
+addInput (GLDeclaration qual tipe name) glDecls =
   case qual of
-    GLS.Attribute -> glDecls { Shader._attribute = Map.insert (N.fromString name) tipe (Shader._attribute glDecls) }
-    GLS.Uniform   -> glDecls { Shader._uniform = Map.insert (N.fromString name) tipe (Shader._uniform glDecls) }
-    GLS.Varying   -> glDecls { Shader._varying = Map.insert (N.fromString name) tipe (Shader._varying glDecls) }
-    _             -> error "Should never happen due to `extractInputs` function"
+    Attribute -> glDecls { Shader._attribute = Map.insert name tipe (Shader._attribute glDecls) }
+    Uniform   -> glDecls { Shader._uniform = Map.insert name tipe (Shader._uniform glDecls) }
+    Varying   -> glDecls { Shader._varying = Map.insert name tipe (Shader._varying glDecls) }
 
 
-extractInputs :: GLS.ExternalDeclaration -> [(GLS.StorageQualifier, Shader.Type, String)]
-extractInputs decl =
-  case decl of
-    GLS.Declaration
-      (GLS.InitDeclaration
-         (GLS.TypeDeclarator
-            (GLS.FullType
-               (Just (GLS.TypeQualSto qual))
-               (GLS.TypeSpec _prec (GLS.TypeSpecNoPrecision tipe _mexpr1))))
-         [GLS.InitDecl name _mexpr2 _mexpr3]
-      ) ->
-        case elem qual [GLS.Attribute, GLS.Varying, GLS.Uniform] of
-          False -> []
-          True ->
-              case tipe of
-                GLS.Vec2 -> [(qual, Shader.V2, name)]
-                GLS.Vec3 -> [(qual, Shader.V3, name)]
-                GLS.Vec4 -> [(qual, Shader.V4, name)]
-                GLS.Mat4 -> [(qual, Shader.M4, name)]
-                GLS.Int -> [(qual, Shader.Int, name)]
-                GLS.Float -> [(qual, Shader.Float, name)]
-                GLS.Sampler2D -> [(qual, Shader.Texture, name)]
-                _ -> []
-    _ -> []
+parserFailure :: Int -> Int -> Int -> Int -> String -> Parser Shader.Shader
+parserFailure startRow startCol row col msg =
+  if row == 1 then
+    Shader.failure startRow (startCol + 6 + col) (Text.pack msg)
+  else
+    Shader.failure (startRow + row - 1) col (Text.pack msg)
