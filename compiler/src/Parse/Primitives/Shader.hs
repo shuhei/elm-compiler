@@ -31,7 +31,7 @@ failure row col msg =
     cerr (E.ParseError row col (E.BadShader msg))
 
 
-block :: Parser Text.Text
+block :: Parser B.ByteString
 block =
   do  Symbol.shaderBlockOpen
       Parser $ \(State fp offset terminal indent row col ctx) cok cerr _ _ ->
@@ -42,7 +42,7 @@ block =
           Ok newOffset newRow newCol ->
             let
               !size = newOffset - offset
-              !shader = Text.decodeUtf8 (B.PS fp offset size)
+              !shader = B.PS fp offset size
               !newState = State fp (newOffset + 2) terminal indent newRow newCol ctx
             in
               cok shader newState noError
