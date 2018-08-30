@@ -62,10 +62,10 @@ data GLDeclaration
 
 parseSource :: Int -> Int -> Parser a -> B.ByteString -> Parser a
 parseSource startRow startCol (Parser parser) (B.PS fp offset length) =
-  case parser (State fp offset (offset + length) 0 1 1 []) Ok Err Ok Err of
-    Ok value _ _ ->
+  case parser (State fp offset (offset + length) 0 1 1 []) ParseOk ParseErr ParseOk ParseErr of
+    ParseOk value _ _ ->
       return value
-    Err (E.ParseError row col problem) ->
+    ParseErr (E.ParseError row col problem) ->
       if row == 1 then
         shaderFailure startRow (startCol + col - 1) problem
       else
@@ -79,9 +79,14 @@ shaderFailure row col problem =
     cerr (E.ParseError row col problem)
 
 
-data Result a
-  = Ok a State E.ParseError
-  | Err E.ParseError
+data Result
+  = Err E.ParseError
+  | Ok Int Int Int
+
+
+data ParseResult a
+  = ParseOk a State E.ParseError
+  | ParseErr E.ParseError
 
 
 parse :: Parser Shader.Shader
@@ -150,27 +155,27 @@ somethingElse :: Parser GLDeclaration
 somethingElse =
   Parser $ \(State fp offset terminal indent row col ctx) cok cerr _ _ ->
     case eatSomethingElse fp offset terminal row col 0 of
-      Left err ->
+      Err err ->
         cerr err
 
-      Right (newOffset, newTerminal, newRow, newCol) ->
+      Ok newOffset newRow newCol ->
         cok
           SomethingElse
-          (State fp newOffset newTerminal indent newRow newCol ctx)
+          (State fp newOffset terminal indent newRow newCol ctx)
           noError
 
 
-eatSomethingElse :: ForeignPtr Word8 -> Int -> Int -> Int -> Int -> Int -> Either E.ParseError ( Int, Int, Int, Int )
+eatSomethingElse :: ForeignPtr Word8 -> Int -> Int -> Int -> Int -> Int -> Result
 eatSomethingElse fp offset terminal row col openCurly =
   if offset >= terminal then
     -- TODO: E.EndOfFile_ShaderSomethingElse?
-    Left (E.ParseError row col E.EndOfFile_Comment)
+    Err (E.ParseError row col E.EndOfFile_Comment)
 
   else
     let !word = I.unsafeIndex fp offset in
     if word == 0x3B {- ; -} then
       if openCurly == 0 then
-        Right ( offset, terminal, row, col )
+        Ok offset row col
       else
         eatSomethingElse fp (offset + 1) terminal row (col + 1) openCurly
 
@@ -179,11 +184,11 @@ eatSomethingElse fp offset terminal row col openCurly =
 
     else if word == 0x7D {- } -} then
       if openCurly == 0 then
-        -- TODO: E.EndOfFile_ShaderIllegalClosingCurly?
-        Left (E.ParseError row col E.EndOfFile_Comment)
+        -- TODO: E.ShaderIllegalClosingCurly?
+        Err (E.ParseError row col E.EndOfFile_Comment)
 
       else if openCurly == 1 then
-        Right ( offset, terminal, row, col )
+        Ok offset row col
 
       else
         eatSomethingElse fp (offset + 1) terminal row (col + 1) (openCurly - 1)
@@ -204,20 +209,20 @@ whitespace :: Parser ()
 whitespace =
   Parser $ \(State fp offset terminal indent row col ctx) cok cerr _ _ ->
     case eatSpaces fp offset terminal row col of
-      Left err ->
+      Err err ->
         cerr err
 
-      Right (newOffset, newTerminal, newRow, newCol) ->
+      Ok newOffset newRow newCol ->
         cok
           ()
-          (State fp newOffset newTerminal indent newRow newCol ctx)
+          (State fp newOffset terminal indent newRow newCol ctx)
           noError
 
 
-eatSpaces :: ForeignPtr Word8 -> Int -> Int -> Int -> Int -> Either E.ParseError ( Int, Int, Int, Int )
+eatSpaces :: ForeignPtr Word8 -> Int -> Int -> Int -> Int -> Result
 eatSpaces fp offset terminal row col =
   if offset >= terminal then
-    Right ( offset, terminal, row, col )
+    Ok offset row col
 
   else
     case I.unsafeIndex fp offset of
@@ -237,17 +242,17 @@ eatSpaces fp offset terminal row col =
         eatSpaces fp (offset + 1) terminal row col
 
       _ ->
-        Right ( offset, terminal, row, col )
+        Ok offset row col
 
 
 
 -- LINE COMMENTS
 
 
-eatComment :: ForeignPtr Word8 -> Int -> Int -> Int -> Int -> Either E.ParseError ( Int, Int, Int, Int )
+eatComment :: ForeignPtr Word8 -> Int -> Int -> Int -> Int -> Result
 eatComment fp offset terminal row col =
   if offset + 1 >= terminal then
-    Right ( offset, terminal, row, col )
+    Ok offset row col
 
   else
     case I.unsafeIndex fp (offset + 1) of
@@ -255,18 +260,20 @@ eatComment fp offset terminal row col =
         eatLineComment fp (offset + 2) terminal row (col + 2)
 
       0x2A {- * -} ->
-        do  (newOffset, newTerminal, newRow, newCol) <-
-              eatMultiComment fp (offset + 2) terminal row (col + 2) 1
-            eatSpaces fp newOffset newTerminal newRow newCol
+        case eatMultiComment fp (offset + 2) terminal row (col + 2) 1 of
+          Ok newOffset newRow newCol ->
+            eatSpaces fp newOffset terminal newRow newCol
+          e@(Err _) ->
+            e
 
       _ ->
-        Right ( offset, terminal, row, col )
+        Ok offset row col
 
 
-eatLineComment :: ForeignPtr Word8 -> Int -> Int -> Int -> Int -> Either E.ParseError ( Int, Int, Int, Int )
+eatLineComment :: ForeignPtr Word8 -> Int -> Int -> Int -> Int -> Result
 eatLineComment fp offset terminal row col =
   if offset >= terminal then
-    Right ( offset, terminal, row, col )
+    Ok offset row col
 
   else
     let !word = I.unsafeIndex fp offset in
@@ -282,10 +289,10 @@ eatLineComment fp offset terminal row col =
 -- MULTI COMMENTS
 
 
-eatMultiComment :: ForeignPtr Word8 -> Int -> Int -> Int -> Int -> Int -> Either E.ParseError ( Int, Int, Int, Int )
+eatMultiComment :: ForeignPtr Word8 -> Int -> Int -> Int -> Int -> Int -> Result
 eatMultiComment fp offset terminal row col openComments =
   if offset >= terminal then
-    Left (E.ParseError row col E.EndOfFile_Comment)
+    Err (E.ParseError row col E.EndOfFile_Comment)
 
   else
     let !word = I.unsafeIndex fp offset in
@@ -294,7 +301,7 @@ eatMultiComment fp offset terminal row col openComments =
 
     else if word == 0x2A {- * -} && I.isWord fp (offset + 1) terminal 0x2F {- / -} then
       if openComments == 1 then
-        Right ( offset + 2, terminal, row, col + 2 )
+        Ok (offset + 2) row (col + 2)
       else
         eatMultiComment fp (offset + 2) terminal row (col + 2) (openComments - 1)
 
