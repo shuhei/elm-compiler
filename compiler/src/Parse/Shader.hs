@@ -188,14 +188,12 @@ eatSomethingElse fp offset terminal row col openCurly =
       else
         eatSomethingElse fp (offset + 1) terminal row (col + 1) (openCurly - 1)
 
+    else if word == 0x0A {- \n -} then
+      eatSomethingElse fp (offset + 1) terminal (row + 1) 1 openCurly
+
     else
       let !newOffset = offset + I.getCharWidth fp offset terminal word in
       eatSomethingElse fp newOffset terminal row (col + 1) openCurly
-
-
-bracket :: Int -> Parser ()
-bracket depth =
-  undefined
 
 
 
@@ -223,19 +221,19 @@ eatSpaces fp offset terminal row col =
 
   else
     case I.unsafeIndex fp offset of
-      0x0020 {-   -} ->
+      0x20 {-   -} ->
         eatSpaces fp (offset + 1) terminal row (col + 1)
 
-      0x0009 {- \t -} ->
+      0x09 {- \t -} ->
         eatSpaces fp (offset + 1) terminal row (col + 1)
 
-      0x000A {- \n -} ->
+      0x0A {- \n -} ->
         eatSpaces fp (offset + 1) terminal (row + 1) 1
 
-      0x002F {- / -} ->
+      0x2F {- / -} ->
         eatComment fp offset terminal row col
 
-      0x000D {- \r -} ->
+      0x0D {- \r -} ->
         eatSpaces fp (offset + 1) terminal row col
 
       _ ->
