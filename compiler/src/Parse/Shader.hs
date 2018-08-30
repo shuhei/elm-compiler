@@ -115,7 +115,7 @@ declaration :: Parser GLDeclaration
 declaration =
   PP.oneOf
     [ variableDeclaration
-    -- , somethingElse
+    , somethingElse
     ]
 
 
@@ -148,17 +148,49 @@ storageQualifier =
 -- Not `{`, not `semicolon`
 somethingElse :: Parser GLDeclaration
 somethingElse =
-  do  eatSomethingElse
-      PP.oneOf
-        [ Symbol.semicolon
-        -- , curlyPair
-        ]
-      return SomethingElse
+  Parser $ \(State fp offset terminal indent row col ctx) cok cerr _ _ ->
+    case eatSomethingElse fp offset terminal row col 0 of
+      Left err ->
+        cerr err
 
--- Eat until {, } or ;
-eatSomethingElse :: Parser ()
-eatSomethingElse =
-  undefined
+      Right (newOffset, newTerminal, newRow, newCol) ->
+        cok
+          SomethingElse
+          (State fp newOffset newTerminal indent newRow newCol ctx)
+          noError
+
+
+eatSomethingElse :: ForeignPtr Word8 -> Int -> Int -> Int -> Int -> Int -> Either E.ParseError ( Int, Int, Int, Int )
+eatSomethingElse fp offset terminal row col openCurly =
+  if offset >= terminal then
+    -- TODO: E.EndOfFile_ShaderSomethingElse?
+    Left (E.ParseError row col E.EndOfFile_Comment)
+
+  else
+    let !word = I.unsafeIndex fp offset in
+    if word == 0x3B {- ; -} then
+      if openCurly == 0 then
+        Right ( offset, terminal, row, col )
+      else
+        eatSomethingElse fp (offset + 1) terminal row (col + 1) openCurly
+
+    else if word == 0x7B {- { -} then
+      eatSomethingElse fp (offset + 1) terminal row (col + 1) (openCurly + 1)
+
+    else if word == 0x7D {- } -} then
+      if openCurly == 0 then
+        -- TODO: E.EndOfFile_ShaderIllegalClosingCurly?
+        Left (E.ParseError row col E.EndOfFile_Comment)
+
+      else if openCurly == 1 then
+        Right ( offset, terminal, row, col )
+
+      else
+        eatSomethingElse fp (offset + 1) terminal row (col + 1) (openCurly - 1)
+
+    else
+      let !newOffset = offset + I.getCharWidth fp offset terminal word in
+      eatSomethingElse fp newOffset terminal row (col + 1) openCurly
 
 
 bracket :: Int -> Parser ()
@@ -208,6 +240,7 @@ eatSpaces fp offset terminal row col =
 
       _ ->
         Right ( offset, terminal, row, col )
+
 
 
 -- LINE COMMENTS
