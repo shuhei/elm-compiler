@@ -186,8 +186,7 @@ whitespace =
 
 eatSpaces :: ForeignPtr Word8 -> Int -> Int -> Int -> Int -> Either E.ParseError ( Int, Int, Int, Int )
 eatSpaces fp offset terminal row col =
-  -- TODO: Why not `terminal - offset`?
-  if terminal == 0 then
+  if offset >= terminal then
     Right ( offset, terminal, row, col )
 
   else
