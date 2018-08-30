@@ -86,10 +86,7 @@ data Result a
 
 parse :: Parser Shader.Shader
 parse =
-  do  R.Position row1 col1 <- getPosition
-      whitespace
-      R.Position row2 col2 <- getPosition
-      let name = show [row1, col1, row2, col2]
+  do  whitespace
       -- TODO: Repeat declaration
       decl <- declaration
       return (foldr addInput emptyShader [decl])
@@ -189,25 +186,26 @@ whitespace =
 
 eatSpaces :: ForeignPtr Word8 -> Int -> Int -> Int -> Int -> Either E.ParseError ( Int, Int, Int, Int )
 eatSpaces fp offset terminal row col =
+  -- TODO: Why not `terminal - offset`?
   if terminal == 0 then
     Right ( offset, terminal, row, col )
 
   else
     case I.unsafeIndex fp offset of
       0x0020 {-   -} ->
-        eatSpaces fp (offset + 1) (terminal - 1) row (col + 1)
+        eatSpaces fp (offset + 1) terminal row (col + 1)
 
       0x0009 {- \t -} ->
-        eatSpaces fp (offset + 1) (terminal - 1) row (col + 1)
+        eatSpaces fp (offset + 1) terminal row (col + 1)
 
       0x000A {- \n -} ->
-        eatSpaces fp (offset + 1) (terminal - 1) (row + 1) 1
+        eatSpaces fp (offset + 1) terminal (row + 1) 1
 
       0x002F {- / -} ->
         eatComment fp offset terminal row col
 
       0x000D {- \r -} ->
-        eatSpaces fp (offset + 1) (terminal - 1) row col
+        eatSpaces fp (offset + 1) terminal row col
 
       _ ->
         Right ( offset, terminal, row, col )
@@ -218,70 +216,64 @@ eatSpaces fp offset terminal row col =
 
 eatComment :: ForeignPtr Word8 -> Int -> Int -> Int -> Int -> Either E.ParseError ( Int, Int, Int, Int )
 eatComment fp offset terminal row col =
-  if terminal == 1 then
+  if offset + 1 >= terminal then
     Right ( offset, terminal, row, col )
 
   else
     case I.unsafeIndex fp (offset + 1) of
-      0x002F {- / -} ->
-        eatLineCommentHelp fp (offset + 2) (terminal - 2) row (col + 2)
+      0x2F {- / -} ->
+        eatLineComment fp (offset + 2) terminal row (col + 2)
 
-      0x002A {- * -} ->
+      0x2A {- * -} ->
         do  (newOffset, newTerminal, newRow, newCol) <-
-              eatMultiCommentHelp fp (offset + 2) (terminal - 2) row (col + 2)
+              eatMultiComment fp (offset + 2) terminal row (col + 2) 1
             eatSpaces fp newOffset newTerminal newRow newCol
 
       _ ->
         Right ( offset, terminal, row, col )
 
 
-eatLineCommentHelp :: ForeignPtr Word8 -> Int -> Int -> Int -> Int -> Either E.ParseError ( Int, Int, Int, Int )
-eatLineCommentHelp fp offset terminal row col =
-  if terminal == 0 then
+eatLineComment :: ForeignPtr Word8 -> Int -> Int -> Int -> Int -> Either E.ParseError ( Int, Int, Int, Int )
+eatLineComment fp offset terminal row col =
+  if offset >= terminal then
     Right ( offset, terminal, row, col )
 
   else
-    let
-      !word = I.unsafeIndex fp offset
-    in
-      if word == 0x000A {- \n -} then
-        eatSpaces fp (offset + 1) (terminal - 1) (row + 1) 1
+    let !word = I.unsafeIndex fp offset in
+    if word == 0x0A {- \n -} then
+      eatSpaces fp (offset + 1) terminal (row + 1) 1
 
-      else if word < 0xD800 || 0xDBFF < word then
-        eatLineCommentHelp fp (offset + 1) (terminal - 1) row (col + 1)
-
-      else
-        eatLineCommentHelp fp (offset + 2) (terminal - 2) row (col + 1)
+    else
+      let !newOffset = offset + I.getCharWidth fp offset terminal word in
+      eatLineComment fp newOffset terminal row (col + 1)
 
 
 
 -- MULTI COMMENTS
 
 
-eatMultiCommentHelp :: ForeignPtr Word8 -> Int -> Int -> Int -> Int -> Either E.ParseError ( Int, Int, Int, Int )
-eatMultiCommentHelp fp offset terminal row col =
-  if terminal == 0 then
+eatMultiComment :: ForeignPtr Word8 -> Int -> Int -> Int -> Int -> Int -> Either E.ParseError ( Int, Int, Int, Int )
+eatMultiComment fp offset terminal row col openComments =
+  if offset >= terminal then
     Left (E.ParseError row col E.EndOfFile_Comment)
 
   else
-    let
-      !word = I.unsafeIndex fp offset
-    in
-      if word == 0x000A {- \n -} then
+    let !word = I.unsafeIndex fp offset in
+    if word == 0x0A {- \n -} then
+      eatMultiComment fp (offset + 1) terminal (row + 1) 1 openComments
 
-        eatMultiCommentHelp fp (offset + 1) (terminal - 1) (row + 1) 1
-
-      else if word == 0x002A {- * -} && terminal > 1 && I.unsafeIndex fp (offset + 1) == 0x002F {- / -} then
-
-        Right ( offset + 2, terminal - 2, row, col + 2 )
-
-      else if word < 0xD800 || 0xDBFF < word then
-
-        eatMultiCommentHelp fp (offset + 1) (terminal - 1) row (col + 1)
-
+    else if word == 0x2A {- * -} && I.isWord fp (offset + 1) terminal 0x2F {- / -} then
+      if openComments == 1 then
+        Right ( offset + 2, terminal, row, col + 2 )
       else
+        eatMultiComment fp (offset + 2) terminal row (col + 2) (openComments - 1)
 
-        eatMultiCommentHelp fp (offset + 2) (terminal - 2) row (col + 1)
+    else if word == 0x2F {- / -} && I.isWord fp (offset + 1) terminal 0x2A {- * -} then
+      eatMultiComment fp (offset + 2) terminal row (col + 2) (openComments + 1)
+
+    else
+      let !newOffset = offset + I.getCharWidth fp offset terminal word in
+      eatMultiComment fp newOffset terminal row (col + 1) openComments
 
 
 
