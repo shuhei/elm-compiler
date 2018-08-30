@@ -154,7 +154,7 @@ storageQualifier =
 somethingElse :: Parser GLDeclaration
 somethingElse =
   Parser $ \(State fp offset terminal indent row col ctx) cok cerr _ _ ->
-    case eatSomethingElse fp offset terminal row col 0 of
+    case eatSomethingElse 0 fp offset terminal row col of
       Err err ->
         cerr err
 
@@ -165,8 +165,8 @@ somethingElse =
           noError
 
 
-eatSomethingElse :: ForeignPtr Word8 -> Int -> Int -> Int -> Int -> Int -> Result
-eatSomethingElse fp offset terminal row col openCurly =
+eatSomethingElse :: Int -> ForeignPtr Word8 -> Int -> Int -> Int -> Int -> Result
+eatSomethingElse openCurly fp offset terminal row col =
   if offset >= terminal then
     -- TODO: E.EndOfFile_ShaderSomethingElse?
     Err (E.ParseError row col E.EndOfFile_Comment)
@@ -177,10 +177,10 @@ eatSomethingElse fp offset terminal row col openCurly =
       if openCurly == 0 then
         Ok offset row col
       else
-        eatSomethingElse fp (offset + 1) terminal row (col + 1) openCurly
+        eatSomethingElse openCurly fp (offset + 1) terminal row (col + 1)
 
     else if word == 0x7B {- { -} then
-      eatSomethingElse fp (offset + 1) terminal row (col + 1) (openCurly + 1)
+      eatSomethingElse (openCurly + 1) fp (offset + 1) terminal row (col + 1)
 
     else if word == 0x7D {- } -} then
       if openCurly == 0 then
@@ -191,14 +191,17 @@ eatSomethingElse fp offset terminal row col openCurly =
         Ok offset row col
 
       else
-        eatSomethingElse fp (offset + 1) terminal row (col + 1) (openCurly - 1)
+        eatSomethingElse (openCurly - 1) fp (offset + 1) terminal row (col + 1)
 
     else if word == 0x0A {- \n -} then
-      eatSomethingElse fp (offset + 1) terminal (row + 1) 1 openCurly
+      eatSomethingElse openCurly fp (offset + 1) terminal (row + 1) 1
+
+    else if word == 0x2F {- / -} then
+      eatComment (eatSomethingElse openCurly) fp offset terminal row col
 
     else
       let !newOffset = offset + I.getCharWidth fp offset terminal word in
-      eatSomethingElse fp newOffset terminal row (col + 1) openCurly
+      eatSomethingElse openCurly fp newOffset terminal row (col + 1)
 
 
 
@@ -236,7 +239,7 @@ eatSpaces fp offset terminal row col =
         eatSpaces fp (offset + 1) terminal (row + 1) 1
 
       0x2F {- / -} ->
-        eatComment fp offset terminal row col
+        eatComment eatSpaces fp offset terminal row col
 
       0x0D {- \r -} ->
         eatSpaces fp (offset + 1) terminal row col
@@ -249,40 +252,43 @@ eatSpaces fp offset terminal row col =
 -- LINE COMMENTS
 
 
-eatComment :: ForeignPtr Word8 -> Int -> Int -> Int -> Int -> Result
-eatComment fp offset terminal row col =
+type Eater = ForeignPtr Word8 -> Int -> Int -> Int -> Int -> Result
+
+
+eatComment :: Eater -> ForeignPtr Word8 -> Int -> Int -> Int -> Int -> Result
+eatComment eat fp offset terminal row col =
   if offset + 1 >= terminal then
     Ok offset row col
 
   else
     case I.unsafeIndex fp (offset + 1) of
       0x2F {- / -} ->
-        eatLineComment fp (offset + 2) terminal row (col + 2)
+        eatLineComment eat fp (offset + 2) terminal row (col + 2)
 
       0x2A {- * -} ->
         case eatMultiComment fp (offset + 2) terminal row (col + 2) 1 of
           Ok newOffset newRow newCol ->
-            eatSpaces fp newOffset terminal newRow newCol
-          e@(Err _) ->
-            e
+            eat fp newOffset terminal newRow newCol
+          err@(Err _) ->
+            err
 
       _ ->
         Ok offset row col
 
 
-eatLineComment :: ForeignPtr Word8 -> Int -> Int -> Int -> Int -> Result
-eatLineComment fp offset terminal row col =
+eatLineComment :: Eater -> ForeignPtr Word8 -> Int -> Int -> Int -> Int -> Result
+eatLineComment eat fp offset terminal row col =
   if offset >= terminal then
     Ok offset row col
 
   else
     let !word = I.unsafeIndex fp offset in
     if word == 0x0A {- \n -} then
-      eatSpaces fp (offset + 1) terminal (row + 1) 1
+      eat fp (offset + 1) terminal (row + 1) 1
 
     else
       let !newOffset = offset + I.getCharWidth fp offset terminal word in
-      eatLineComment fp newOffset terminal row (col + 1)
+      eatLineComment eat fp newOffset terminal row (col + 1)
 
 
 
