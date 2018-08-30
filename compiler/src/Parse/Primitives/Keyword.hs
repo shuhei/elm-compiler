@@ -9,6 +9,7 @@ module Parse.Primitives.Keyword
   , module_, import_, exposing_, as_, where_, effect_
   , command_, subscription_
   , jsonTrue, jsonFalse, jsonNull
+  , varying, uniform, attribute
   )
   where
 
@@ -233,3 +234,25 @@ jsonFalse =
 jsonNull :: Parser ()
 jsonNull =
   keyword "null"
+
+
+
+-- SHADER
+
+
+{-# NOINLINE varying #-}
+varying :: Parser ()
+varying =
+  keyword "varying"
+
+
+{-# NOINLINE uniform #-}
+uniform :: Parser ()
+uniform =
+  keyword "uniform"
+
+
+{-# NOINLINE attribute #-}
+attribute :: Parser ()
+attribute =
+  keyword "attribute"

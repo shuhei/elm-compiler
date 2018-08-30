@@ -6,7 +6,7 @@ module Parse.Primitives.Symbol
   , equals, rightArrow, hasType, comma, pipe, cons, dot, doubleDot, minus, lambda
   , leftParen, rightParen, leftSquare, rightSquare, leftCurly, rightCurly
   , elmDocCommentOpen, jsMultiCommentOpen, jsMultiCommentClose
-  , shaderBlockOpen
+  , shaderBlockOpen, semicolon, sharp
   )
   where
 
@@ -257,3 +257,13 @@ jsMultiCommentClose =
 shaderBlockOpen :: Parser ()
 shaderBlockOpen =
   symbol "[glsl|"
+
+{-# NOINLINE semicolon #-}
+semicolon :: Parser ()
+semicolon =
+  symbol ";"
+
+{-# NOINLINE sharp #-}
+sharp :: Parser ()
+sharp =
+  symbol "#"

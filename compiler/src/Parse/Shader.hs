@@ -26,8 +26,10 @@ import qualified Reporting.Error.Syntax as E
 import qualified Reporting.Region as R
 import Parse.Primitives as PP
 import Parse.Primitives (Parser, getPosition)
-import Parse.Primitives.Variable (chompInnerChars)
 import Parse.Primitives.Internals (Parser(..), State(..), noError)
+import Parse.Primitives.Keyword as Keyword
+import Parse.Primitives.Variable (chompInnerChars)
+import Parse.Primitives.Symbol as Symbol
 import qualified Parse.Primitives.Internals as I
 import qualified Parse.Primitives.Shader as Shader
 import qualified Parse.Primitives.Variable as Var
@@ -127,30 +129,34 @@ variableDeclaration :: Parser GLDeclaration
 variableDeclaration =
     do  qual <- storageQualifier
         -- TODO: Make whitespace required
-        {- whitespace -}
-        {- tipe <- typeName -}
-        {- whitespace -}
-        {- name <- identifier -}
-        {- whitespace -}
-        -- TODO: Semicolon
-        -- whitespace
-        return $ VariableDeclaration qual Shader.V2 "vcoord"
+        whitespace
+        tipe <- typeName
+        whitespace
+        name <- identifier
+        whitespace
+        Symbol.semicolon
+        whitespace
+        return $ VariableDeclaration qual tipe name
 
 
 storageQualifier :: Parser StorageQualifier
 storageQualifier =
   PP.oneOf
-    [ varying >> return Varying
-    , uniform >> return Uniform
-    , attribute >> return Attribute
+    [ Keyword.varying >> return Varying
+    , Keyword.uniform >> return Uniform
+    , Keyword.attribute >> return Attribute
     ]
 
 
 -- Not `{`, not `semicolon`
 somethingElse :: Parser GLDeclaration
 somethingElse =
-  undefined
-
+  do  eatSomethingElse
+      PP.oneOf
+        [ Symbol.semicolon
+        -- , curlyPair
+        ]
+      return SomethingElse
 
 -- Eat until {, } or ;
 eatSomethingElse :: Parser ()
@@ -161,52 +167,6 @@ eatSomethingElse =
 bracket :: Int -> Parser ()
 bracket depth =
   undefined
-
-
--- PRIVATE
--- Copied from compiler/src/Parse/Primitives/Keyword.hs
-{- We can some avoid allocation by declaring all available keywords here.
-That means the `keyword` function should only be used within this file on
-values tagged as NOINLINE.
--}
-keyword :: B.ByteString -> Parser ()
-keyword kwd@(B.PS kwdFp kwdOffset kwdLength) =
-  let
-    !theory =
-      assert
-        (I.isNonNewlineAscii kwdFp kwdOffset (kwdOffset + kwdLength))
-        (E.Keyword (Char8.unpack kwd))
-  in
-  Parser $ \(State fp offset terminal indent row col ctx) cok _ _ eerr ->
-    if I.isSubstring kwdFp kwdOffset kwdLength fp offset terminal
-      && Var.getInnerWidth fp (offset + kwdLength) terminal == 0
-    then
-      let
-        !newState =
-          State fp (offset + kwdLength) terminal indent row (col + kwdLength) ctx
-      in
-        cok () newState noError
-
-    else
-      eerr (expect row col ctx [theory])
-
-
-{-# NOINLINE varying #-}
-varying :: Parser ()
-varying =
-  keyword "varying"
-
-
-{-# NOINLINE uniform #-}
-uniform :: Parser ()
-uniform =
-  keyword "uniform"
-
-
-{-# NOINLINE attribute #-}
-attribute :: Parser ()
-attribute =
-  keyword "attribute"
 
 
 
@@ -347,8 +307,8 @@ typeFromName name =
     "int" -> Just Shader.Int
     "float" -> Just Shader.Float
     "vec2" -> Just Shader.V2
-    "vec3" -> Just Shader.V2
-    "vec4" -> Just Shader.V2
+    "vec3" -> Just Shader.V3
+    "vec4" -> Just Shader.V4
     "mat4" -> Just Shader.M4
     "sampler2D" -> Just Shader.Texture
     _ -> Nothing
