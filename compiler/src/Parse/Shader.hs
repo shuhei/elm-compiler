@@ -92,9 +92,8 @@ data ParseResult a
 parse :: Parser Shader.Shader
 parse =
   do  whitespace
-      -- TODO: Repeat declaration
-      decl <- declaration
-      return (foldr addInput emptyShader [decl])
+      decls <- chompDeclarations []
+      return (foldr addInput emptyShader decls)
 
 
 emptyShader :: Shader.Shader
@@ -116,11 +115,22 @@ addInput SomethingElse glDecls =
 -- PARSER
 
 
+chompDeclarations :: [GLDeclaration] -> Parser [GLDeclaration]
+chompDeclarations decls =
+  do  decl <- declaration
+      PP.oneOf
+        [ chompDeclarations (decl:decls)
+        , return (reverse (decl:decls))
+        ]
+
+
 declaration :: Parser GLDeclaration
 declaration =
   PP.oneOf
     [ variableDeclaration
-    , somethingElse
+    , do  something <- somethingElse
+          whitespace
+          return something
     ]
 
 
@@ -153,29 +163,37 @@ storageQualifier =
 -- Not `{`, not `semicolon`
 somethingElse :: Parser GLDeclaration
 somethingElse =
-  Parser $ \(State fp offset terminal indent row col ctx) cok cerr _ _ ->
+  Parser $ \(State fp offset terminal indent row col ctx) cok cerr _ eerr ->
     case eatSomethingElse 0 fp offset terminal row col of
       Err err ->
         cerr err
 
       Ok newOffset newRow newCol ->
-        cok
-          SomethingElse
-          (State fp newOffset terminal indent newRow newCol ctx)
-          noError
+        if newOffset > offset then
+          cok
+            SomethingElse
+            (State fp newOffset terminal indent newRow newCol ctx)
+            noError
+
+        else
+          eerr (E.ParseError row col (E.BadShader "Expected something"))
 
 
 eatSomethingElse :: Int -> ForeignPtr Word8 -> Int -> Int -> Int -> Int -> Result
 eatSomethingElse openCurly fp offset terminal row col =
   if offset >= terminal then
-    -- TODO: E.EndOfFile_ShaderSomethingElse?
-    Err (E.ParseError row col E.EndOfFile_Comment)
+    if openCurly > 0 then
+      Err (E.ParseError row col (E.BadShader "EndOfFile_UnclosedCurly"))
+
+    else
+      Ok offset row col
 
   else
     let !word = I.unsafeIndex fp offset in
     if word == 0x3B {- ; -} then
       if openCurly == 0 then
-        Ok offset row col
+        Ok (offset + 1) row (col + 1)
+
       else
         eatSomethingElse openCurly fp (offset + 1) terminal row (col + 1)
 
@@ -184,11 +202,10 @@ eatSomethingElse openCurly fp offset terminal row col =
 
     else if word == 0x7D {- } -} then
       if openCurly == 0 then
-        -- TODO: E.ShaderIllegalClosingCurly?
-        Err (E.ParseError row col E.EndOfFile_Comment)
+        Err (E.ParseError row col (E.BadShader "ShaderIllegalClosingCurly"))
 
       else if openCurly == 1 then
-        Ok offset row col
+        Ok (offset + 1) row (col + 1)
 
       else
         eatSomethingElse (openCurly - 1) fp (offset + 1) terminal row (col + 1)
@@ -298,7 +315,7 @@ eatLineComment eat fp offset terminal row col =
 eatMultiComment :: ForeignPtr Word8 -> Int -> Int -> Int -> Int -> Int -> Result
 eatMultiComment fp offset terminal row col openComments =
   if offset >= terminal then
-    Err (E.ParseError row col E.EndOfFile_Comment)
+    Err (E.ParseError row col (E.BadShader "EndOfFile_MultiComment"))
 
   else
     let !word = I.unsafeIndex fp offset in
