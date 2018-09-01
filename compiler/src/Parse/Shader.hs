@@ -111,6 +111,7 @@ addInput SomethingElse glDecls =
 chompDeclarations :: [GLDeclaration] -> Parser [GLDeclaration]
 chompDeclarations decls =
   do  decl <- declaration
+      whitespace
       PP.oneOf
         [ chompDeclarations (decl:decls)
         , return (reverse (decl:decls))
@@ -121,9 +122,7 @@ declaration :: Parser GLDeclaration
 declaration =
   PP.oneOf
     [ variableDeclaration
-    , do  something <- somethingElse
-          whitespace
-          return something
+    , somethingElse
     ]
 
 
@@ -136,7 +135,6 @@ variableDeclaration =
         name <- identifier
         whitespace
         Symbol.semicolon
-        whitespace
         return $ VariableDeclaration qual tipe name
 
 
