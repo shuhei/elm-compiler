@@ -213,6 +213,9 @@ eatSomethingElse openCurly fp offset terminal row col =
     else if word == 0x2F {- / -} then
       eatComment (eatSomethingElse openCurly) fp offset terminal row col
 
+    else if word == 0x23 {- # -} then
+      eatLineComment (eatSomethingElse openCurly) fp (offset + 1) terminal row (col + 1)
+
     else
       let !newOffset = offset + I.getCharWidth fp offset terminal word in
       eatSomethingElse openCurly fp newOffset terminal row (col + 1)
@@ -254,6 +257,9 @@ eatSpaces fp offset terminal row col =
 
       0x2F {- / -} ->
         eatComment eatSpaces fp offset terminal row col
+
+      0x23 {- # -} ->
+        eatLineComment eatSpaces fp (offset + 1) terminal row (col + 1)
 
       0x0D {- \r -} ->
         eatSpaces fp (offset + 1) terminal row col
