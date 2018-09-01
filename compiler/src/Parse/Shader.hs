@@ -8,7 +8,6 @@ module Parse.Shader
 
 import Control.Exception (assert)
 import Data.Bits ((.&.), (.|.), shiftL)
-import qualified Data.ByteString.Char8 as Char8
 import qualified Data.ByteString.Internal as B
 import qualified Data.Char as Char
 import qualified Data.List as List
@@ -32,7 +31,6 @@ import Parse.Primitives.Variable (chompInnerChars)
 import Parse.Primitives.Symbol as Symbol
 import qualified Parse.Primitives.Internals as I
 import qualified Parse.Primitives.Shader as Shader
-import qualified Parse.Primitives.Variable as Var
 
 
 
@@ -72,7 +70,6 @@ parseSource startRow startCol (Parser parser) (B.PS fp offset length) =
         shaderFailure (startRow + row - 1) col problem
 
 
--- TODO: Use E.BadShader?
 shaderFailure :: Int -> Int -> E.Problem -> Parser a
 shaderFailure row col problem =
   Parser $ \_ _ cerr _ _ ->
@@ -418,7 +415,7 @@ getNondigitWidthHelp fp offset terminal word
   | word < 0xe0 = if Char.isAlpha (getChar2 fp offset terminal word) then 2 else 0
   | word < 0xf0 = if Char.isAlpha (getChar3 fp offset terminal word) then 3 else 0
   | word < 0xf8 = if Char.isAlpha (getChar4 fp offset terminal word) then 4 else 0
-  | True        = 0
+  | otherwise   = 0
 
 
 
