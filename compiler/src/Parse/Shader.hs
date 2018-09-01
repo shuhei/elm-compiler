@@ -6,10 +6,7 @@ module Parse.Shader
   where
 
 
-import Control.Exception (assert)
-import Data.Bits ((.&.), (.|.), shiftL)
 import qualified Data.ByteString.Internal as B
-import qualified Data.Char as Char
 import qualified Data.List as List
 import qualified Data.Map as Map
 import qualified Data.Text as Text
@@ -27,7 +24,6 @@ import Parse.Primitives as PP
 import Parse.Primitives (Parser, getPosition)
 import Parse.Primitives.Internals (Parser(..), State(..), noError)
 import Parse.Primitives.Keyword as Keyword
-import Parse.Primitives.Variable (chompInnerChars)
 import Parse.Primitives.Symbol as Symbol
 import qualified Parse.Primitives.Internals as I
 import qualified Parse.Primitives.Shader as Shader
@@ -131,13 +127,9 @@ declaration =
     ]
 
 
--- Start with whitespace and end with a semicolon.
--- Quantifier, type and name.
--- Precision?
 variableDeclaration :: Parser GLDeclaration
 variableDeclaration =
     do  qual <- storageQualifier
-        -- TODO: Make whitespace required
         whitespace
         tipe <- typeName
         whitespace
@@ -157,7 +149,6 @@ storageQualifier =
     ]
 
 
--- Not `{`, not `semicolon`
 somethingElse :: Parser GLDeclaration
 somethingElse =
   Parser $ \(State fp offset terminal indent row col ctx) cok cerr _ eerr ->
@@ -394,87 +385,35 @@ identifier =
 
 chompNondigit :: ForeignPtr Word8 -> Int -> Int -> Int -> (# Int, Int #)
 chompNondigit fp offset terminal col =
-  let !width = getNondigitWidth fp offset terminal in
-  if width == 0 then
+  if offset < terminal && isNonDigitChar (I.unsafeIndex fp offset) then
+    chompInnerChars fp (offset + 1) terminal (col + 1)
+  else
     (# offset, col #)
+
+
+{-# INLINE isNonDigitChar #-}
+isNonDigitChar :: Word8 -> Bool
+isNonDigitChar word
+  | 0x61 {- a -} <= word && word <= 0x7A {- z -} = True
+  | 0x41 {- A -} <= word && word <= 0x5A {- Z -} = True
+  | word == 0x5F {- _ -} = True
+  | otherwise   = False
+
+
+
+-- INNER CHARS
+
+
+chompInnerChars :: ForeignPtr Word8 -> Int -> Int -> Int -> (# Int, Int #)
+chompInnerChars fp !offset terminal !col =
+  if offset < terminal && isInnerChar (I.unsafeIndex fp offset) then
+    chompInnerChars fp (offset + 1) terminal (col + 1)
   else
-    chompInnerChars fp (offset + width) terminal (col + 1)
+    (# offset, col #)
 
 
-{-# INLINE getNondigitWidth #-}
-getNondigitWidth :: ForeignPtr Word8 -> Int -> Int -> Int
-getNondigitWidth fp offset terminal =
-  if offset < terminal then
-    getNondigitWidthHelp fp offset terminal (I.unsafeIndex fp offset)
-  else
-    0
-
-
-{-# INLINE getNondigitWidthHelp #-}
-getNondigitWidthHelp :: ForeignPtr Word8 -> Int -> Int -> Word8 -> Int
-getNondigitWidthHelp fp offset terminal word
-  | 0x61 {- a -} <= word && word <= 0x7A {- z -} = 1
-  | 0x41 {- A -} <= word && word <= 0x5A {- Z -} = 1
-  | word == 0x5F {- _ -} = 1
-  | word < 0xc0 = 0
-  -- TODO: Why are these necessary?
-  | word < 0xe0 = if Char.isAlpha (getChar2 fp offset terminal word) then 2 else 0
-  | word < 0xf0 = if Char.isAlpha (getChar3 fp offset terminal word) then 3 else 0
-  | word < 0xf8 = if Char.isAlpha (getChar4 fp offset terminal word) then 4 else 0
-  | otherwise   = 0
-
-
-
--- EXTRACT CHARACTERS
-
-
-push :: Word8 -> Int -> Int
-push word code =
-  assert (word .&. 0xc0 == 0x80) (
-    shiftL code 6 .|. fromEnum (word .&. 0x3f)
-  )
-
-
-getChar2 :: ForeignPtr Word8 -> Int -> Int -> Word8 -> Char
-getChar2 fp offset terminal word =
-  assert (offset + 2 <= terminal) (
-    let
-      !word1 = word .&. 0x1f
-      !word2 = I.unsafeIndex fp (offset + 1)
-      !code = push word2 (fromEnum word1)
-    in
-    assert (0x80 <= code) (
-      toEnum code
-    )
-  )
-
-
-getChar3 :: ForeignPtr Word8 -> Int -> Int -> Word8 -> Char
-getChar3 fp offset terminal word =
-  assert (offset + 3 <= terminal) (
-    let
-      !word1 = word .&. 0x0f
-      !word2 = I.unsafeIndex fp (offset + 1)
-      !word3 = I.unsafeIndex fp (offset + 2)
-      !code = push word3 (push word2 (fromEnum word1))
-    in
-    assert ((0x800 <= code && code < 0xd800) || (0xdfff < code && code < 0xfffe)) (
-      toEnum code
-    )
-  )
-
-
-getChar4 :: ForeignPtr Word8 -> Int -> Int -> Word8 -> Char
-getChar4 fp offset terminal word =
-  assert (offset + 4 <= terminal) (
-    let
-      !word1 = word .&. 0x07
-      !word2 = I.unsafeIndex fp (offset + 1)
-      !word3 = I.unsafeIndex fp (offset + 2)
-      !word4 = I.unsafeIndex fp (offset + 3)
-      !code = push word4 (push word3 (push word2 (fromEnum word1)))
-    in
-    assert (0x10000 <= code && code < 0x110000) (
-      toEnum code
-    )
-  )
+{-# INLINE isInnerChar #-}
+isInnerChar :: Word8 -> Bool
+isInnerChar word
+  | 0x30 {- 0 -} <= word && word <= 0x39 {- 9 -} = True
+  | otherwise = isNonDigitChar word
