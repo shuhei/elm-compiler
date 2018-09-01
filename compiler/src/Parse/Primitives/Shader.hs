@@ -2,7 +2,6 @@
 {-# LANGUAGE BangPatterns #-}
 module Parse.Primitives.Shader
   ( block
-  , failure
   )
   where
 
@@ -19,12 +18,6 @@ import qualified Reporting.Error.Syntax as E
 
 
 -- SHADER
-
-
-failure :: Int -> Int -> E.ShaderProblem -> Parser a
-failure row col problem =
-  Parser $ \_ _ cerr _ _ ->
-    cerr (E.ParseError row col (E.BadShader problem))
 
 
 block :: Parser B.ByteString
