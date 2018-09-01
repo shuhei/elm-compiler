@@ -7,6 +7,7 @@ module Reporting.Error.Syntax
   , EscapeProblem(..)
   , ContextStack, Context(..)
   , BadOp(..), Next(..)
+  , ShaderProblem(..)
   , toReport
   )
   where
@@ -59,7 +60,7 @@ data Problem
   | BadNumberHex
   | BadNumberZero
   | FloatInPattern
-  | BadShader Text.Text
+  | BadShader ShaderProblem
   | BadUnderscore Int
   | BadOp BadOp ContextStack
   | Theories ContextStack [Theory]
@@ -129,6 +130,14 @@ data Context
   | Infix
   | Port
   deriving (Eq, Ord)
+
+
+data ShaderProblem
+  = EndOfShader_UnclosedCurly
+  | EndOfShader_MultiComment
+  | SomethingExpected
+  | TypeExpected
+  | IllegalClosingCurly
 
 
 
@@ -429,11 +438,11 @@ problemToDocs problem =
           \ are nearby with some sort of (abs (actual - expected) < 0.001) check."
       )
 
-    BadShader msg ->
+    BadShader shaderProblem ->
       (
         "I ran into a problem while parsing this GLSL block."
       ,
-        D.reflow (Text.unpack msg)
+        D.reflow (shaderProblemToHint shaderProblem)
       )
 
     BadUnderscore _ ->
@@ -574,6 +583,25 @@ isCaseRelated stack =
 
     (context, _) : rest ->
       context == ExprCase || isCaseRelated rest
+
+
+shaderProblemToHint :: ShaderProblem -> String
+shaderProblemToHint problem =
+  case problem of
+    EndOfShader_MultiComment ->
+      "I got to the end of the file while parsing a multi-line comment."
+
+    EndOfShader_UnclosedCurly ->
+      "I got to the end of the file while parsing a block. There are unclosed curlies left."
+
+    TypeExpected ->
+      "I was expecting to see a type. A type looks like int, vec2, etc."
+
+    IllegalClosingCurly ->
+      "I was not expecting a closing curly because there was no open curly corresponding to it."
+
+    SomethingExpected ->
+      "I was expecting to see something."
 
 
 

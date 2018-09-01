@@ -8,8 +8,6 @@ module Parse.Primitives.Shader
 
 
 import qualified Data.ByteString.Internal as B
-import qualified Data.Text as Text
-import qualified Data.Text.Encoding as Text
 import Foreign.ForeignPtr (ForeignPtr)
 import GHC.Word (Word8)
 
@@ -23,10 +21,10 @@ import qualified Reporting.Error.Syntax as E
 -- SHADER
 
 
-failure :: Int -> Int -> Text.Text -> Parser a
-failure row col msg =
+failure :: Int -> Int -> E.ShaderProblem -> Parser a
+failure row col problem =
   Parser $ \_ _ cerr _ _ ->
-    cerr (E.ParseError row col (E.BadShader msg))
+    cerr (E.ParseError row col (E.BadShader problem))
 
 
 block :: Parser B.ByteString

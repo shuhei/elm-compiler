@@ -173,14 +173,14 @@ somethingElse =
             noError
 
         else
-          eerr (E.ParseError row col (E.BadShader "Expected something"))
+          eerr (E.ParseError row col (E.BadShader E.SomethingExpected))
 
 
 eatSomethingElse :: Int -> ForeignPtr Word8 -> Int -> Int -> Int -> Int -> Result
 eatSomethingElse openCurly fp offset terminal row col =
   if offset >= terminal then
     if openCurly > 0 then
-      Err (E.ParseError row col (E.BadShader "EndOfFile_UnclosedCurly"))
+      Err (E.ParseError row col (E.BadShader E.EndOfShader_UnclosedCurly))
 
     else
       Ok offset row col
@@ -199,7 +199,7 @@ eatSomethingElse openCurly fp offset terminal row col =
 
     else if word == 0x7D {- } -} then
       if openCurly == 0 then
-        Err (E.ParseError row col (E.BadShader "ShaderIllegalClosingCurly"))
+        Err (E.ParseError row col (E.BadShader E.IllegalClosingCurly))
 
       else if openCurly == 1 then
         Ok (offset + 1) row (col + 1)
@@ -312,7 +312,7 @@ eatLineComment eat fp offset terminal row col =
 eatMultiComment :: ForeignPtr Word8 -> Int -> Int -> Int -> Int -> Int -> Result
 eatMultiComment fp offset terminal row col openComments =
   if offset >= terminal then
-    Err (E.ParseError row col (E.BadShader "EndOfFile_MultiComment"))
+    Err (E.ParseError row col (E.BadShader E.EndOfShader_MultiComment))
 
   else
     let !word = I.unsafeIndex fp offset in
@@ -339,15 +339,15 @@ eatMultiComment fp offset terminal row col openComments =
 
 typeName :: Parser Shader.Type
 typeName =
-  Parser $ \(State fp offset terminal indent row col ctx) cok _ _ eerr ->
+  Parser $ \(State fp offset terminal indent row col ctx) cok cerr _ eerr ->
     let (# newOffset, newCol #) = chompNondigit fp offset terminal col in
     if offset == newOffset then
-      eerr (expect row col ctx [E.LowVar, E.CapVar, E.Symbol "_"])
+      eerr (expect row col ctx [E.LowVar, E.CapVar])
     else
       let !name = N.fromForeignPtr fp offset (newOffset - offset) in
       case typeFromName name of
         Just tipe -> cok tipe (State fp newOffset terminal indent row newCol ctx) noError
-        Nothing -> eerr (expect row col ctx [E.Expecting E.Type])
+        Nothing -> cerr (E.ParseError row col (E.BadShader E.TypeExpected))
 
 
 typeFromName :: N.Name -> Maybe Shader.Type
